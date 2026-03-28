@@ -4,13 +4,44 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from lib import db, rag
+from lib import db, rag, auth
 
 st.set_page_config(page_title="Multimodal RAG", page_icon="🔍", layout="wide")
-st.title("Multimodal RAG with Gemini Embedding")
 
-# ── Sidebar ──────────────────────────────────────────────────────────────────
+# ── Login Gate ────────────────────────────────────────────────────────────────
+if "user" not in st.session_state:
+    st.title("Multimodal RAG — Login")
+    st.markdown("---")
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        with st.form("login_form"):
+            st.subheader("Anmelden")
+            username = st.text_input("Benutzername")
+            password = st.text_input("Passwort", type="password")
+            submitted = st.form_submit_button("Login", type="primary", use_container_width=True)
+        if submitted:
+            user = auth.login(username, password)
+            if user:
+                st.session_state["user"] = user
+                st.rerun()
+            else:
+                st.error("Ungültige Anmeldedaten oder Konto deaktiviert.")
+    st.stop()
+
+# ── Logged-in helpers ─────────────────────────────────────────────────────────
+current_user = st.session_state["user"]
+role = current_user["role"]  # admin | user | viewer
+is_admin = role == "admin"
+is_viewer = role == "viewer"
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    st.markdown(f"**{current_user['username']}** `{role}`")
+    if st.button("Logout"):
+        del st.session_state["user"]
+        st.rerun()
+
+    st.divider()
     st.header("Settings")
     top_k = st.slider("Top K results", 1, 50, 10)
     threshold = st.slider("Similarity threshold", 0.0, 1.0, 0.5, 0.05)
@@ -37,56 +68,68 @@ with st.sidebar:
     except Exception as e:
         st.error(f"Could not load stats: {e}")
 
-# ── Tabs ─────────────────────────────────────────────────────────────────────
-tab_upload, tab_search, tab_browse = st.tabs(["Upload & Embed", "Search", "Browse"])
+# ── Tabs (role-based) ─────────────────────────────────────────────────────────
+st.title("Multimodal RAG with Gemini Embedding")
 
-# ── Tab 1: Upload & Embed ───────────────────────────────────────────────────
-with tab_upload:
-    st.subheader("Upload files to embed")
-    uploaded_files = st.file_uploader(
-        "Choose one or more files",
-        type=["txt", "png", "jpg", "jpeg", "webp", "gif", "pdf", "mp3", "wav", "mp4", "mov", "avi"],
-        accept_multiple_files=True,
+if is_admin:
+    tab_upload, tab_search, tab_browse, tab_admin = st.tabs(
+        ["Upload & Embed", "Search", "Browse", "Admin"]
     )
-    title = st.text_input("Document title (applied to all files)", placeholder="My document")
+elif is_viewer:
+    (tab_search,) = st.tabs(["Search"])
+    tab_upload = tab_browse = tab_admin = None
+else:  # user
+    tab_upload, tab_search, tab_browse = st.tabs(["Upload & Embed", "Search", "Browse"])
+    tab_admin = None
 
-    if uploaded_files and title:
-        if st.button("Embed & Store", type="primary"):
-            total_stored = 0
-            for file_idx, uploaded in enumerate(uploaded_files):
-                st.write(f"**Processing {file_idx+1}/{len(uploaded_files)}: {uploaded.name}**")
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                chunks_done = [0]
+# ── Tab: Upload & Embed ───────────────────────────────────────────────────────
+if tab_upload:
+    with tab_upload:
+        st.subheader("Upload files to embed")
+        uploaded_files = st.file_uploader(
+            "Choose one or more files",
+            type=["txt", "png", "jpg", "jpeg", "webp", "gif", "pdf", "mp3", "wav", "mp4", "mov", "avi"],
+            accept_multiple_files=True,
+        )
+        title = st.text_input("Document title (applied to all files)", placeholder="My document")
 
-                def on_progress(msg: str, _bar=progress_bar, _st=status_text, _c=chunks_done):
-                    _c[0] += 1
-                    _st.text(msg)
-                    _bar.progress(min(_c[0] * 10, 100))
+        if uploaded_files and title:
+            if st.button("Embed & Store", type="primary"):
+                total_stored = 0
+                for file_idx, uploaded in enumerate(uploaded_files):
+                    st.write(f"**Processing {file_idx+1}/{len(uploaded_files)}: {uploaded.name}**")
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    chunks_done = [0]
 
-                try:
-                    file_bytes = uploaded.read()
-                    mime = uploaded.type or "application/octet-stream"
-                    status_text.text("Processing...")
-                    results = rag.ingest(
-                        file_bytes=file_bytes,
-                        filename=uploaded.name,
-                        title=title,
-                        mime_type=mime,
-                        on_progress=on_progress,
-                    )
-                    progress_bar.progress(100)
-                    status_text.text("Done!")
-                    total_stored += len(results)
-                except Exception as e:
-                    st.error(f"Error processing {uploaded.name}: {e}")
-                    raise
-            st.success(f"Stored {total_stored} chunk(s) across {len(uploaded_files)} file(s)")
-            st.cache_data.clear()
-    elif uploaded_files and not title:
-        st.warning("Please enter a document title.")
+                    def on_progress(msg: str, _bar=progress_bar, _st=status_text, _c=chunks_done):
+                        _c[0] += 1
+                        _st.text(msg)
+                        _bar.progress(min(_c[0] * 10, 100))
 
-# ── Tab 2: Search ───────────────────────────────────────────────────────────
+                    try:
+                        file_bytes = uploaded.read()
+                        mime = uploaded.type or "application/octet-stream"
+                        status_text.text("Processing...")
+                        results = rag.ingest(
+                            file_bytes=file_bytes,
+                            filename=uploaded.name,
+                            title=title,
+                            mime_type=mime,
+                            on_progress=on_progress,
+                        )
+                        progress_bar.progress(100)
+                        status_text.text("Done!")
+                        total_stored += len(results)
+                    except Exception as e:
+                        st.error(f"Error processing {uploaded.name}: {e}")
+                        raise
+                st.success(f"Stored {total_stored} chunk(s) across {len(uploaded_files)} file(s)")
+                st.cache_data.clear()
+        elif uploaded_files and not title:
+            st.warning("Please enter a document title.")
+
+# ── Tab: Search ───────────────────────────────────────────────────────────────
 with tab_search:
     st.subheader("Query your documents")
     query_text = st.text_area("Enter your query", height=100)
@@ -137,44 +180,114 @@ with tab_search:
                     if src.get("metadata"):
                         st.json(src["metadata"])
 
-# ── Tab 3: Browse ───────────────────────────────────────────────────────────
-with tab_browse:
-    st.subheader("All documents")
+# ── Tab: Browse ───────────────────────────────────────────────────────────────
+if tab_browse:
+    with tab_browse:
+        st.subheader("All documents")
 
-    try:
-        docs = db.get_all_documents()
-    except Exception as e:
-        st.error(f"Error loading documents: {e}")
-        docs = []
+        try:
+            docs = db.get_all_documents()
+        except Exception as e:
+            st.error(f"Error loading documents: {e}")
+            docs = []
 
-    if not docs:
-        st.info("No documents yet. Upload something in the first tab.")
-    else:
-        st.dataframe(
-            docs,
-            use_container_width=True,
-            column_config={
-                "id": st.column_config.TextColumn("ID", width="small"),
-                "title": st.column_config.TextColumn("Title"),
-                "content_type": st.column_config.TextColumn("Type"),
-                "original_filename": st.column_config.TextColumn("Filename"),
-                "chunk_index": st.column_config.NumberColumn("Chunk"),
-                "chunk_total": st.column_config.NumberColumn("Total"),
-                "created_at": st.column_config.TextColumn("Created"),
-            },
-        )
+        if not docs:
+            st.info("No documents yet. Upload something in the first tab.")
+        else:
+            st.dataframe(
+                docs,
+                use_container_width=True,
+                column_config={
+                    "id": st.column_config.TextColumn("ID", width="small"),
+                    "title": st.column_config.TextColumn("Title"),
+                    "content_type": st.column_config.TextColumn("Type"),
+                    "original_filename": st.column_config.TextColumn("Filename"),
+                    "chunk_index": st.column_config.NumberColumn("Chunk"),
+                    "chunk_total": st.column_config.NumberColumn("Total"),
+                    "created_at": st.column_config.TextColumn("Created"),
+                },
+            )
+
+            if is_admin:
+                st.divider()
+                st.subheader("Delete documents")
+                delete_id = st.text_input("Document ID to delete")
+                if st.button("Delete", type="secondary"):
+                    if delete_id.strip():
+                        try:
+                            db.delete_document(delete_id.strip())
+                            st.success(f"Deleted {delete_id}")
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Delete error: {e}")
+                    else:
+                        st.warning("Enter a document ID.")
+
+# ── Tab: Admin ────────────────────────────────────────────────────────────────
+if tab_admin:
+    with tab_admin:
+        st.subheader("Benutzerverwaltung")
+
+        # ── Neuen User anlegen ────────────────────────────────────────────────
+        with st.expander("Neuen Benutzer anlegen", expanded=False):
+            with st.form("create_user_form"):
+                new_username = st.text_input("Benutzername")
+                new_email = st.text_input("E-Mail")
+                new_password = st.text_input("Passwort", type="password")
+                new_role = st.selectbox("Rolle", ["user", "viewer", "admin"])
+                if st.form_submit_button("Benutzer erstellen", type="primary"):
+                    if new_username and new_email and new_password:
+                        try:
+                            auth.create_user(new_username, new_email, new_password, new_role)
+                            st.success(f"Benutzer '{new_username}' wurde erstellt.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Fehler: {e}")
+                    else:
+                        st.warning("Alle Felder ausfüllen.")
 
         st.divider()
-        st.subheader("Delete documents")
-        delete_id = st.text_input("Document ID to delete")
-        if st.button("Delete", type="secondary"):
-            if delete_id.strip():
-                try:
-                    db.delete_document(delete_id.strip())
-                    st.success(f"Deleted {delete_id}")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Delete error: {e}")
-            else:
-                st.warning("Enter a document ID.")
+
+        # ── User-Liste ────────────────────────────────────────────────────────
+        try:
+            users = auth.get_all_users()
+        except Exception as e:
+            st.error(f"Fehler beim Laden der Benutzer: {e}")
+            users = []
+
+        for u in users:
+            col_info, col_role, col_active, col_del = st.columns([3, 2, 1, 1])
+            with col_info:
+                st.markdown(f"**{u['username']}** — {u['email']}")
+                st.caption(f"Erstellt: {u['created_at'][:10] if u['created_at'] else '-'}")
+            with col_role:
+                new_role = st.selectbox(
+                    "Rolle",
+                    ["user", "viewer", "admin"],
+                    index=["user", "viewer", "admin"].index(u["role"]),
+                    key=f"role_{u['id']}",
+                    label_visibility="collapsed",
+                )
+                if new_role != u["role"]:
+                    if st.button("Speichern", key=f"save_{u['id']}"):
+                        auth.update_user(u["id"], {"role": new_role})
+                        st.success(f"Rolle für '{u['username']}' gespeichert.")
+                        st.rerun()
+            with col_active:
+                label = "Aktiv" if u["is_active"] else "Inaktiv"
+                if st.button(label, key=f"toggle_{u['id']}"):
+                    # Admins können sich nicht selbst deaktivieren
+                    if u["id"] == current_user["id"]:
+                        st.warning("Du kannst dich nicht selbst deaktivieren.")
+                    else:
+                        auth.update_user(u["id"], {"is_active": not u["is_active"]})
+                        st.rerun()
+            with col_del:
+                if st.button("Löschen", key=f"del_{u['id']}", type="secondary"):
+                    if u["id"] == current_user["id"]:
+                        st.warning("Du kannst dich nicht selbst löschen.")
+                    else:
+                        auth.delete_user(u["id"])
+                        st.rerun()
+            st.divider()
