@@ -1,4 +1,8 @@
 import base64
+import os
+import tempfile
+import zipfile
+from datetime import date
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -128,6 +132,92 @@ if tab_upload:
                 st.cache_data.clear()
         elif uploaded_files and not title:
             st.warning("Please enter a document title.")
+
+        # ── Ordner-Import via ZIP ─────────────────────────────────────────────
+        st.divider()
+        st.subheader("Ordner-Import (ZIP)")
+        st.caption("Ordner als ZIP hochladen — alle Unterordner werden rekursiv verarbeitet.")
+
+        SUPPORTED_EXT = {
+            ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif",
+            ".mp3", ".wav", ".mp4", ".mov", ".avi",
+            ".docx", ".xlsx", ".xls", ".csv",
+        }
+        MIME_BY_EXT = {
+            ".txt": "text/plain", ".pdf": "application/pdf",
+            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".webp": "image/webp", ".gif": "image/gif",
+            ".mp3": "audio/mpeg", ".wav": "audio/wav",
+            ".mp4": "video/mp4", ".mov": "video/quicktime", ".avi": "video/x-msvideo",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".xls": "application/vnd.ms-excel", ".csv": "text/csv",
+        }
+
+        zip_title = st.text_input(
+            "Dokumententitel (für alle Dateien)",
+            value=date.today().strftime("%Y-%m-%d"),
+            key="zip_title",
+        )
+        zip_file = st.file_uploader("ZIP-Datei hochladen", type=["zip"], key="zip_upload")
+
+        if zip_file and zip_title:
+            if st.button("Ordner einbetten", type="primary", key="zip_embed"):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    zip_path = os.path.join(tmpdir, "upload.zip")
+                    with open(zip_path, "wb") as f:
+                        f.write(zip_file.read())
+                    with zipfile.ZipFile(zip_path, "r") as zf:
+                        zf.extractall(tmpdir)
+
+                    # Alle unterstützten Dateien rekursiv sammeln (max. 4 Ebenen)
+                    all_files = []
+                    for root, dirs, files in os.walk(tmpdir):
+                        depth = root.replace(tmpdir, "").count(os.sep)
+                        if depth > 4:
+                            dirs.clear()
+                            continue
+                        for fname in sorted(files):
+                            ext = os.path.splitext(fname)[1].lower()
+                            if ext in SUPPORTED_EXT and fname != "upload.zip":
+                                all_files.append(os.path.join(root, fname))
+
+                    if not all_files:
+                        st.warning("Keine unterstützten Dateien im ZIP gefunden.")
+                    else:
+                        st.info(f"{len(all_files)} Dateien gefunden — starte Embedding...")
+                        overall = st.progress(0)
+                        log = st.empty()
+                        total_stored = 0
+                        errors = []
+
+                        for idx, filepath in enumerate(all_files):
+                            fname = os.path.basename(filepath)
+                            rel_path = os.path.relpath(filepath, tmpdir)
+                            log.text(f"[{idx+1}/{len(all_files)}] {rel_path}")
+                            ext = os.path.splitext(fname)[1].lower()
+                            mime = MIME_BY_EXT.get(ext, "application/octet-stream")
+                            try:
+                                with open(filepath, "rb") as f:
+                                    file_bytes = f.read()
+                                results = rag.ingest(
+                                    file_bytes=file_bytes,
+                                    filename=fname,
+                                    title=zip_title,
+                                    mime_type=mime,
+                                )
+                                total_stored += len(results)
+                            except Exception as e:
+                                errors.append(f"{rel_path}: {e}")
+                            overall.progress((idx + 1) / len(all_files))
+
+                        log.text("Fertig!")
+                        st.success(f"{total_stored} Chunks aus {len(all_files)} Dateien gespeichert.")
+                        if errors:
+                            with st.expander(f"{len(errors)} Fehler"):
+                                for err in errors:
+                                    st.error(err)
+                        st.cache_data.clear()
 
 # ── Tab: Search ───────────────────────────────────────────────────────────────
 with tab_search:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import base64
-from lib import embedder, db, codex, chunker
+from lib import embedder, db, codex, chunker, converters
 
 MIME_MAP = {
     "image/png": "image",
@@ -16,6 +16,11 @@ MIME_MAP = {
     "video/mp4": "video",
     "video/quicktime": "video",
     "video/x-msvideo": "video",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/msword": "docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "excel",
+    "application/vnd.ms-excel": "excel",
+    "text/csv": "csv",
 }
 
 AUDIO_FMT = {
@@ -46,6 +51,12 @@ def detect_content_type(mime: str, filename: str) -> str:
         return "audio"
     if ext in ("mp4", "mov", "avi"):
         return "video"
+    if ext in ("docx", "doc"):
+        return "docx"
+    if ext in ("xlsx", "xls"):
+        return "excel"
+    if ext == "csv":
+        return "csv"
     return "text"
 
 
@@ -118,6 +129,30 @@ def ingest(
                 metadata={"chunk_pages": len(pdf_bytes)},
                 embedding=vec,
                 file_data=full_pdf_b64,
+            )
+            results.append(row)
+
+    elif content_type in ("docx", "excel", "csv"):
+        if content_type == "docx":
+            text = converters.extract_docx_text(file_bytes)
+        elif content_type == "excel":
+            text = converters.extract_xlsx_text(file_bytes)
+        else:
+            text = converters.extract_csv_text(file_bytes)
+        chunks = chunker.chunk_text(text)
+        total = len(chunks)
+        for i, chunk_text in enumerate(chunks):
+            _progress(f"Embedding {content_type} chunk {i+1}/{total}")
+            vec = embedder.embed_text(chunk_text)
+            row = db.insert_document(
+                title=title,
+                content_type=content_type,
+                original_filename=filename,
+                chunk_index=i,
+                chunk_total=total,
+                text_content=chunk_text,
+                metadata={"char_count": len(chunk_text)},
+                embedding=vec,
             )
             results.append(row)
 
