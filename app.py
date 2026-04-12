@@ -174,6 +174,11 @@ with tab_search:
                         mime = (src.get("metadata") or {}).get("mime_type", "video/mp4")
                         st.video(vid_bytes, format=mime)
                     elif src["content_type"] == "pdf" and src.get("file_data"):
+                        st.markdown(
+                            f'<iframe src="data:application/pdf;base64,{src["file_data"]}" '
+                            f'width="100%" height="600px" style="border:none;border-radius:4px;"></iframe>',
+                            unsafe_allow_html=True,
+                        )
                         pdf_bytes = base64.b64decode(src["file_data"])
                         st.download_button(
                             label="PDF herunterladen",
