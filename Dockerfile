@@ -23,7 +23,7 @@ address = "0.0.0.0"\n\
 headless = true\n\
 enableCORS = false\n\
 enableXsrfProtection = false\n\
-maxUploadSize = 2048\n\
+maxUploadSize = 10240\n\
 \n\
 [browser]\n\
 gatherUsageStats = false\n' > /app/.streamlit/config.toml
