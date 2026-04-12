@@ -173,6 +173,17 @@ with tab_search:
                         vid_bytes = base64.b64decode(src["file_data"])
                         mime = (src.get("metadata") or {}).get("mime_type", "video/mp4")
                         st.video(vid_bytes, format=mime)
+                    elif src["content_type"] == "pdf" and src.get("file_data"):
+                        pdf_bytes = base64.b64decode(src["file_data"])
+                        st.download_button(
+                            label="PDF herunterladen",
+                            data=pdf_bytes,
+                            file_name=src["original_filename"],
+                            mime="application/pdf",
+                            key=f"pdf_{src.get('id', src['original_filename'])}_{src['chunk_index']}",
+                        )
+                        if src.get("text_content"):
+                            st.text(src["text_content"][:2000])
                     elif src.get("text_content"):
                         st.text(src["text_content"][:2000])
                     else:

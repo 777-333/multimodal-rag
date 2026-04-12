@@ -101,6 +101,7 @@ def ingest(
         results.append(row)
 
     elif content_type == "pdf":
+        full_pdf_b64 = base64.b64encode(file_bytes).decode("ascii")
         pdf_chunks = chunker.chunk_pdf(file_bytes)
         total = len(pdf_chunks)
         for i, pdf_bytes in enumerate(pdf_chunks):
@@ -116,6 +117,7 @@ def ingest(
                 text_content=text[:10000] if text else None,
                 metadata={"chunk_pages": len(pdf_bytes)},
                 embedding=vec,
+                file_data=full_pdf_b64,
             )
             results.append(row)
 
