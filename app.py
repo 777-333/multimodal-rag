@@ -258,7 +258,7 @@ with tab_search:
                 ):
                     if src["content_type"] == "image" and src.get("file_data"):
                         img_bytes = base64.b64decode(src["file_data"])
-                        st.image(img_bytes, caption=src["original_filename"], use_container_width=True)
+                        st.image(img_bytes, caption=src["original_filename"], width="stretch")
                     elif src["content_type"] == "video" and src.get("file_data"):
                         vid_bytes = base64.b64decode(src["file_data"])
                         mime = (src.get("metadata") or {}).get("mime_type", "video/mp4")
