@@ -22,7 +22,7 @@ if "user" not in st.session_state:
             st.subheader("Anmelden")
             username = st.text_input("Benutzername")
             password = st.text_input("Passwort", type="password")
-            submitted = st.form_submit_button("Login", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("Login", type="primary", width="stretch")
         if submitted:
             user = auth.login(username, password)
             if user:
@@ -376,7 +376,7 @@ if tab_browse:
         else:
             st.dataframe(
                 docs,
-                use_container_width=True,
+                width="stretch",
                 column_config={
                     "id": st.column_config.TextColumn("ID", width="small"),
                     "title": st.column_config.TextColumn("Title"),
