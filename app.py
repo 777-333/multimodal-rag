@@ -133,6 +133,80 @@ if tab_upload:
         elif uploaded_files and not title:
             st.warning("Please enter a document title.")
 
+        # ── Server-Pfad Import ────────────────────────────────────────────────
+        st.divider()
+        st.subheader("Server-Pfad Import")
+        st.caption("Dateien per SFTP auf den Server kopieren → Pfad angeben → einbetten (kein Upload-Limit).")
+
+        server_title = st.text_input(
+            "Dokumententitel",
+            value=date.today().strftime("%Y-%m-%d"),
+            key="server_title",
+        )
+        server_path = st.text_input(
+            "Ordnerpfad auf dem Server",
+            placeholder="/imports/mein-ordner",
+            key="server_path",
+        )
+
+        if server_path and server_title:
+            if st.button("Server-Pfad einbetten", type="primary", key="server_embed"):
+                if not os.path.isdir(server_path):
+                    st.error(f"Pfad nicht gefunden: `{server_path}`")
+                else:
+                    SUPPORTED_EXT_SRV = {
+                        ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif",
+                        ".mp3", ".wav", ".mp4", ".mov", ".avi",
+                        ".docx", ".xlsx", ".xls", ".csv",
+                    }
+                    all_files_srv = []
+                    for root, dirs, files in os.walk(server_path):
+                        depth = root.replace(server_path, "").count(os.sep)
+                        if depth > 4:
+                            dirs.clear()
+                            continue
+                        for fname in sorted(files):
+                            ext = os.path.splitext(fname)[1].lower()
+                            if ext in SUPPORTED_EXT_SRV:
+                                all_files_srv.append(os.path.join(root, fname))
+
+                    if not all_files_srv:
+                        st.warning("Keine unterstützten Dateien im Pfad gefunden.")
+                    else:
+                        st.info(f"{len(all_files_srv)} Dateien gefunden — starte Embedding...")
+                        overall_srv = st.progress(0)
+                        log_srv = st.empty()
+                        total_stored_srv = 0
+                        errors_srv = []
+
+                        for idx, filepath in enumerate(all_files_srv):
+                            fname = os.path.basename(filepath)
+                            rel_path = os.path.relpath(filepath, server_path)
+                            log_srv.text(f"[{idx+1}/{len(all_files_srv)}] {rel_path}")
+                            ext = os.path.splitext(fname)[1].lower()
+                            mime = MIME_BY_EXT.get(ext, "application/octet-stream")
+                            try:
+                                with open(filepath, "rb") as f:
+                                    file_bytes = f.read()
+                                results = rag.ingest(
+                                    file_bytes=file_bytes,
+                                    filename=fname,
+                                    title=server_title,
+                                    mime_type=mime,
+                                )
+                                total_stored_srv += len(results)
+                            except Exception as e:
+                                errors_srv.append(f"{rel_path}: {e}")
+                            overall_srv.progress((idx + 1) / len(all_files_srv))
+
+                        log_srv.text("Fertig!")
+                        st.success(f"{total_stored_srv} Chunks aus {len(all_files_srv)} Dateien gespeichert.")
+                        if errors_srv:
+                            with st.expander(f"{len(errors_srv)} Fehler"):
+                                for err in errors_srv:
+                                    st.error(err)
+                        st.cache_data.clear()
+
         # ── Ordner-Import via ZIP ─────────────────────────────────────────────
         st.divider()
         st.subheader("Ordner-Import (ZIP)")
